@@ -67,3 +67,70 @@ def test_validate_reports_missing_and_failed_windows(tmp_path: Path):
     assert report.failed_windows == ["2025-01-08..2025-01-15"]
     assert report.missing_windows == ["2025-01-15..2025-01-22"]
     store.close()
+
+
+def test_validate_reports_complete_window_with_unexhausted_cursor(tmp_path: Path):
+    from datetime import date
+
+    store = open_store(tmp_path)
+    user_id = store.upsert_user(UserProfile("alice", "100"))
+    store.upsert_tweets(user_id, [make_tweet("1", "2025-01-02T00:00:00")])
+    store.complete_window(
+        user_id,
+        date(2025, 1, 1),
+        date(2025, 1, 8),
+        [make_tweet("1", "2025-01-02T00:00:00")],
+        "cursor-still-present",
+        "stopped after 3 consecutive empty pages",
+    )
+
+    report = validate_range(store, "alice", date(2025, 1, 1), date(2025, 1, 8), 7)
+
+    assert report.ok
+    assert report.suspicious_windows == [
+        "2025-01-01..2025-01-08: stopped after 3 consecutive empty pages"
+    ]
+    store.close()
+
+
+def test_complete_window_replaces_overlapping_window_state(tmp_path: Path):
+    from datetime import date
+
+    store = open_store(tmp_path)
+    user_id = store.upsert_user(UserProfile("alice", "100"))
+    store.complete_window(user_id, date(2025, 1, 1), date(2025, 1, 8), [], None)
+    store.complete_window(user_id, date(2025, 1, 1), date(2025, 1, 9), [], None)
+
+    rows = store.conn.execute(
+        """
+        SELECT since_date, until_date
+        FROM fetch_windows
+        WHERE user_id = ?
+        ORDER BY since_date, until_date
+        """,
+        (user_id,),
+    ).fetchall()
+
+    assert [(row["since_date"], row["until_date"]) for row in rows] == [("2025-01-01", "2025-01-09")]
+    store.close()
+
+
+def test_complete_window_records_actual_database_count(tmp_path: Path):
+    from datetime import date
+
+    store = open_store(tmp_path)
+    user_id = store.upsert_user(UserProfile("alice", "100"))
+    store.upsert_tweets(
+        user_id,
+        [
+            make_tweet("1", "2025-01-02T00:00:00"),
+            make_tweet("2", "2025-01-03T00:00:00"),
+        ],
+    )
+
+    store.complete_window(user_id, date(2025, 1, 1), date(2025, 1, 8), [make_tweet("1", "2025-01-02T00:00:00")], None)
+    row = store.window_status(user_id, date(2025, 1, 1), date(2025, 1, 8))
+
+    assert row is not None
+    assert row["tweet_count"] == 2
+    store.close()

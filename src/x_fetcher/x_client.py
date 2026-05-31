@@ -136,15 +136,20 @@ class XClient:
         if r.status_code != 200:
             raise XClientError(f"UserByScreenName HTTP {r.status_code}: {r.text[:200]}")
         user = r.json().get("data", {}).get("user", {}).get("result", {})
+        if isinstance(user, dict) and "legacy" not in user:
+            nested = user.get("core", {}).get("user_results", {}).get("result", {})
+            if nested:
+                user = nested
         rest_id = str(user.get("rest_id") or "")
         if not rest_id:
             raise XClientError(f"Cannot find user id for @{screen_name}")
         legacy = user.get("legacy") or {}
+        core = user.get("core") or {}
         return UserProfile(
-            screen_name=str(legacy.get("screen_name") or screen_name),
+            screen_name=str(legacy.get("screen_name") or core.get("screen_name") or screen_name),
             rest_id=rest_id,
-            display_name=str(legacy.get("name") or ""),
-            profile_created_at=str(legacy.get("created_at") or ""),
+            display_name=str(legacy.get("name") or core.get("name") or ""),
+            profile_created_at=str(legacy.get("created_at") or core.get("created_at") or ""),
         )
 
     def user_tweets(self, query_id: str, user_id: str, cursor: str | None = None, count: int = 40) -> XResponse:

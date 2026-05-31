@@ -25,7 +25,7 @@ def parse_tweet_result(result: dict[str, Any]) -> Tweet | None:
 
     legacy = tweet.get("legacy") or {}
     status_id = str(tweet.get("rest_id") or "")
-    text = str(legacy.get("full_text") or "").replace("\u2028", "\n").replace("\u2029", "\n")
+    text = tweet_text(tweet, legacy)
     created_at_raw = str(legacy.get("created_at") or "")
     if not status_id or not text or not created_at_raw:
         return None
@@ -49,6 +49,23 @@ def parse_tweet_result(result: dict[str, Any]) -> Tweet | None:
         views=view_count,
         raw_json=tweet,
     )
+
+
+def tweet_text(tweet: dict[str, Any], legacy: dict[str, Any]) -> str:
+    note_result = (
+        tweet.get("note_tweet", {})
+        .get("note_tweet_results", {})
+        .get("result", {})
+    )
+    if isinstance(note_result, dict):
+        note_text = note_result.get("text")
+        if note_text:
+            return normalize_text(str(note_text))
+    return normalize_text(str(legacy.get("full_text") or ""))
+
+
+def normalize_text(text: str) -> str:
+    return text.replace("\u2028", "\n").replace("\u2029", "\n")
 
 
 def user_timeline_instructions(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -82,14 +99,14 @@ def collect_entries(instructions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return entries
 
 
-def parse_entry(entry: dict[str, Any]) -> tuple[Tweet | None, str | None]:
+def parse_entry(entry: dict[str, Any]) -> tuple[list[Tweet], str | None]:
     content = entry.get("content") or {}
     if content.get("cursorType") == "Bottom":
-        return None, content.get("value") or None
+        return [], content.get("value") or None
 
-    tweet_result = None
+    tweet_results: list[dict[str, Any]] = []
     if content.get("entryType") == "TimelineTimelineItem":
-        tweet_result = content.get("itemContent", {}).get("tweet_results", {}).get("result", {})
+        tweet_results.append(content.get("itemContent", {}).get("tweet_results", {}).get("result", {}))
     elif content.get("entryType") == "TimelineTimelineModule":
         for item in content.get("items") or []:
             candidate = (
@@ -99,8 +116,6 @@ def parse_entry(entry: dict[str, Any]) -> tuple[Tweet | None, str | None]:
                 .get("result", {})
             )
             if candidate:
-                tweet_result = candidate
-                break
-    if not tweet_result:
-        return None, None
-    return parse_tweet_result(tweet_result), None
+                tweet_results.append(candidate)
+    tweets = [tweet for result in tweet_results if (tweet := parse_tweet_result(result))]
+    return tweets, None

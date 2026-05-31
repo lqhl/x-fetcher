@@ -160,6 +160,7 @@ def print_validation(report) -> None:
         ("missing_windows", report.missing_windows),
         ("partial_windows", report.partial_windows),
         ("failed_windows", report.failed_windows),
+        ("suspicious_windows", report.suspicious_windows),
     ):
         if values:
             print(f"{label}:")

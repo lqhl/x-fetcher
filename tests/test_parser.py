@@ -27,6 +27,16 @@ def test_parse_tweet_result():
     assert parsed.views == 5
 
 
+def test_parse_tweet_result_prefers_note_tweet_text():
+    result = tweet_result(text="truncated")
+    result["note_tweet"] = {"note_tweet_results": {"result": {"text": "full longform text"}}}
+
+    parsed = parse_tweet_result(result)
+
+    assert parsed is not None
+    assert parsed.text == "full longform text"
+
+
 def test_parse_search_page_extracts_tweet_and_cursor():
     data = {
         "data": {
@@ -56,3 +66,44 @@ def test_parse_search_page_extracts_tweet_and_cursor():
 
     assert [t.status_id for t in tweets] == ["42"]
     assert cursor == "cursor-1"
+
+
+def test_parse_search_page_extracts_all_module_tweets():
+    def module_item(status_id: str):
+        return {
+            "item": {
+                "itemContent": {
+                    "tweet_results": {
+                        "result": tweet_result(status_id),
+                    }
+                }
+            }
+        }
+
+    data = {
+        "data": {
+            "search_by_raw_query": {
+                "search_timeline": {
+                    "timeline": {
+                        "instructions": [
+                            {
+                                "entries": [
+                                    {
+                                        "content": {
+                                            "entryType": "TimelineTimelineModule",
+                                            "items": [module_item("1"), module_item("2")],
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    tweets, cursor = parse_search_page(data)
+
+    assert [t.status_id for t in tweets] == ["1", "2"]
+    assert cursor is None

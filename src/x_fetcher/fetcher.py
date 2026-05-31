@@ -79,7 +79,7 @@ class Fetcher:
                 )
                 stats = self.store.upsert_tweets(user_id, tweets)
                 result.add_stats(stats)
-                self.store.complete_window(user_id, since, until, tweets, last_cursor)
+                self.store.complete_window(user_id, since, until, tweets, last_cursor, reason)
                 result.fetched_windows += 1
                 if reason:
                     result.reasons.append(f"{since}/{until}: {reason}")
@@ -206,11 +206,10 @@ def parse_timeline_page(data: dict) -> tuple[list[Tweet], str | None]:
     tweets: list[Tweet] = []
     cursor = None
     for entry in collect_entries(user_timeline_instructions(data)):
-        tweet, entry_cursor = parse_entry(entry)
+        entry_tweets, entry_cursor = parse_entry(entry)
         if entry_cursor:
             cursor = entry_cursor
-        if tweet:
-            tweets.append(tweet)
+        tweets.extend(entry_tweets)
     return tweets, cursor
 
 
@@ -218,11 +217,10 @@ def parse_search_page(data: dict) -> tuple[list[Tweet], str | None]:
     tweets: list[Tweet] = []
     cursor = None
     for entry in collect_entries(search_instructions(data)):
-        tweet, entry_cursor = parse_entry(entry)
+        entry_tweets, entry_cursor = parse_entry(entry)
         if entry_cursor:
             cursor = entry_cursor
-        if tweet:
-            tweets.append(tweet)
+        tweets.extend(entry_tweets)
     return tweets, cursor
 
 

@@ -75,6 +75,8 @@ class Store:
                 oldest_seen_at TEXT,
                 newest_seen_at TEXT,
                 last_cursor TEXT,
+                completion_reason TEXT,
+                exhausted_cursor INTEGER DEFAULT 0,
                 finished_at TEXT,
                 error TEXT,
                 UNIQUE(user_id, since_date, until_date)
@@ -85,7 +87,14 @@ class Store:
             CREATE INDEX IF NOT EXISTS idx_windows_user_range ON fetch_windows(user_id, since_date, until_date);
             """
         )
+        self._ensure_column("fetch_windows", "completion_reason", "TEXT")
+        self._ensure_column("fetch_windows", "exhausted_cursor", "INTEGER DEFAULT 0")
         self.conn.commit()
+
+    def _ensure_column(self, table: str, column: str, column_type: str) -> None:
+        existing = {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
     def upsert_user(self, profile: UserProfile) -> int:
         now = utc_now()
@@ -168,10 +177,17 @@ class Store:
         self.conn.commit()
         return UpsertStats(inserted, updated, skipped)
 
-    def complete_window(self, user_id: int, since: date, until: date, tweets: list[Tweet], last_cursor: str | None) -> None:
-        oldest = min((t.created_at_utc.isoformat() for t in tweets), default=None)
-        newest = max((t.created_at_utc.isoformat() for t in tweets), default=None)
-        self._upsert_window(user_id, since, until, "complete", len(tweets), oldest, newest, last_cursor, None)
+    def complete_window(
+        self,
+        user_id: int,
+        since: date,
+        until: date,
+        tweets: list[Tweet],
+        last_cursor: str | None,
+        reason: str | None = None,
+    ) -> None:
+        count, oldest, newest = self.window_tweet_summary(user_id, since, until)
+        self._upsert_window(user_id, since, until, "complete", count, oldest, newest, last_cursor, reason, None)
 
     def partial_window(
         self,
@@ -182,12 +198,28 @@ class Store:
         last_cursor: str | None,
         error: str | None = None,
     ) -> None:
-        oldest = min((t.created_at_utc.isoformat() for t in tweets), default=None)
-        newest = max((t.created_at_utc.isoformat() for t in tweets), default=None)
-        self._upsert_window(user_id, since, until, "partial", len(tweets), oldest, newest, last_cursor, error)
+        count, oldest, newest = self.window_tweet_summary(user_id, since, until)
+        self._upsert_window(user_id, since, until, "partial", count, oldest, newest, last_cursor, None, error)
 
     def failed_window(self, user_id: int, since: date, until: date, error: str) -> None:
-        self._upsert_window(user_id, since, until, "failed", 0, None, None, None, error)
+        self._upsert_window(user_id, since, until, "failed", 0, None, None, None, None, error)
+
+    def window_tweet_summary(self, user_id: int, since: date, until: date) -> tuple[int, str | None, str | None]:
+        row = self.conn.execute(
+            """
+            SELECT COUNT(*) count, MIN(created_at_utc) oldest, MAX(created_at_utc) newest
+            FROM tweets
+            WHERE user_id = ?
+              AND created_at_utc >= ?
+              AND created_at_utc < ?
+            """,
+            (
+                user_id,
+                datetime.combine(since, datetime.min.time(), timezone.utc).isoformat(),
+                datetime.combine(until, datetime.min.time(), timezone.utc).isoformat(),
+            ),
+        ).fetchone()
+        return int(row["count"]), row["oldest"], row["newest"]
 
     def _upsert_window(
         self,
@@ -199,21 +231,35 @@ class Store:
         oldest: str | None,
         newest: str | None,
         cursor: str | None,
+        completion_reason: str | None,
         error: str | None,
     ) -> None:
+        exhausted_cursor = 1 if status == "complete" and cursor is None else 0
+        self.conn.execute(
+            """
+            DELETE FROM fetch_windows
+            WHERE user_id = ?
+              AND since_date < ?
+              AND until_date > ?
+              AND NOT (since_date = ? AND until_date = ?)
+            """,
+            (user_id, until.isoformat(), since.isoformat(), since.isoformat(), until.isoformat()),
+        )
         self.conn.execute(
             """
             INSERT INTO fetch_windows(
                 user_id, since_date, until_date, status, tweet_count, oldest_seen_at,
-                newest_seen_at, last_cursor, finished_at, error
+                newest_seen_at, last_cursor, completion_reason, exhausted_cursor, finished_at, error
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, since_date, until_date) DO UPDATE SET
                 status=excluded.status,
                 tweet_count=excluded.tweet_count,
                 oldest_seen_at=excluded.oldest_seen_at,
                 newest_seen_at=excluded.newest_seen_at,
                 last_cursor=excluded.last_cursor,
+                completion_reason=excluded.completion_reason,
+                exhausted_cursor=excluded.exhausted_cursor,
                 finished_at=excluded.finished_at,
                 error=excluded.error
             """,
@@ -226,6 +272,8 @@ class Store:
                 oldest,
                 newest,
                 cursor,
+                completion_reason,
+                exhausted_cursor,
                 utc_now() if status in ("complete", "failed") else None,
                 error,
             ),

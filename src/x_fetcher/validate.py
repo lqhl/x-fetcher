@@ -18,6 +18,7 @@ class ValidationReport:
     missing_windows: list[str] = field(default_factory=list)
     partial_windows: list[str] = field(default_factory=list)
     failed_windows: list[str] = field(default_factory=list)
+    suspicious_windows: list[str] = field(default_factory=list)
 
 
 def validate_range(store: Store, screen_name: str, since: date, until: date, window_days: int = 7) -> ValidationReport:
@@ -72,6 +73,9 @@ def validate_range(store: Store, screen_name: str, since: date, until: date, win
             report.partial_windows.append(label)
         elif win["status"] == "failed":
             report.failed_windows.append(label)
+        elif win["status"] == "complete" and int(win["exhausted_cursor"] or 0) == 0:
+            reason = win["completion_reason"] or "unknown completion reason"
+            report.suspicious_windows.append(f"{label}: {reason}")
 
     if report.errors or report.missing_windows or report.partial_windows or report.failed_windows:
         report.ok = False
