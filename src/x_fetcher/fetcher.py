@@ -60,12 +60,7 @@ class Fetcher:
         search_qid = self.client.find_operation_query_id(target.screen_name, "SearchTimeline")
         for since, until in split_windows(target.since, target.until, self.config.window_days):
             row = self.store.window_status(user_id, since, until)
-            if (
-                not force_window
-                and row
-                and row["status"] == "complete"
-                and (int(row["tweet_count"] or 0) == 0 or self.store.window_has_tweets(user_id, since, until))
-            ):
+            if not force_window and is_skippable_window(self.store, user_id, since, until):
                 result.skipped_windows += 1
                 continue
             initial_cursor = row["last_cursor"] if row and row["status"] in ("partial", "failed") else None
@@ -239,3 +234,35 @@ def split_windows(since: date, until: date, window_days: int) -> list[tuple[date
         windows.append((current, end))
         current = end
     return windows
+
+
+def is_skippable_window(store: Store, user_id: int, since: date, until: date) -> bool:
+    return is_skippable_range(store, user_id, since, until)
+
+
+def count_skippable_windows(store: Store, target: TargetConfig, window_days: int) -> int | None:
+    user_id = store.get_user_id(target.screen_name)
+    if user_id is None:
+        return None
+
+    windows = split_windows(target.since, target.until, window_days)
+    if is_skippable_range(store, user_id, target.since, target.until):
+        return len(windows)
+    return None
+
+
+def is_skippable_range(store: Store, user_id: int, since: date, until: date) -> bool:
+    covered_until = since
+    for row in store.complete_windows_overlapping(user_id, since, until):
+        row_since = date.fromisoformat(row["since_date"])
+        row_until = date.fromisoformat(row["until_date"])
+        if row_until <= covered_until:
+            continue
+        if row_since > covered_until:
+            return False
+        if int(row["tweet_count"] or 0) > 0 and not store.window_has_tweets(user_id, row_since, row_until):
+            continue
+        covered_until = row_until
+        if covered_until >= until:
+            return True
+    return False

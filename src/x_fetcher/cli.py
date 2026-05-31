@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from .config import load_config
-from .fetcher import Fetcher
+from .fetcher import Fetcher, count_skippable_windows
 from .store import Store
 from .validate import validate_range
 from .x_client import XClient
@@ -85,12 +85,24 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         until=args.until,
         db_path=args.db_path,
         max_tweets=args.max_tweets,
-        require_secrets=True,
+        require_secrets=False,
     )
     target = config.target_for(args.user)
     store = Store(config.db_path)
     store.init_schema()
     try:
+        if not args.force_window:
+            skipped_windows = count_skippable_windows(store, target, config.window_days)
+            if skipped_windows is not None:
+                print(
+                    "fetch complete: "
+                    f"inserted=0 updated=0 fetched_windows=0 skipped_windows={skipped_windows}"
+                )
+                if not args.no_validate:
+                    report = validate_range(store, target.screen_name, target.since, target.until, config.window_days)
+                    print_validation(report)
+                    return 0 if report.ok else 2
+                return 0
         if config.secrets is None:
             raise ValueError("secrets.yaml is required for fetch")
         fetcher = Fetcher(config, store, XClient(config.secrets))

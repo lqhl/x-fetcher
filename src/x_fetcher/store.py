@@ -242,6 +242,7 @@ class Store:
               AND since_date < ?
               AND until_date > ?
               AND NOT (since_date = ? AND until_date = ?)
+              AND status != 'complete'
             """,
             (user_id, until.isoformat(), since.isoformat(), since.isoformat(), until.isoformat()),
         )
@@ -289,6 +290,19 @@ class Store:
             (user_id, since.isoformat(), until.isoformat()),
         ).fetchone()
 
+    def complete_windows_overlapping(self, user_id: int, since: date, until: date) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            """
+            SELECT * FROM fetch_windows
+            WHERE user_id = ?
+              AND status = 'complete'
+              AND since_date < ?
+              AND until_date > ?
+            ORDER BY since_date, until_date
+            """,
+            (user_id, until.isoformat(), since.isoformat()),
+        ).fetchall()
+
     def window_has_tweets(self, user_id: int, since: date, until: date) -> bool:
         row = self.conn.execute(
             """
@@ -306,9 +320,19 @@ class Store:
         ).fetchone()
         return row is not None
 
-    def stats(self, user_id: int | None = None) -> dict[str, object]:
-        where = "WHERE user_id = ?" if user_id else ""
-        args = (user_id,) if user_id else ()
+    def stats(self, user_id: int | None = None, since: date | None = None, until: date | None = None) -> dict[str, object]:
+        clauses = []
+        args: list[object] = []
+        if user_id:
+            clauses.append("user_id = ?")
+            args.append(user_id)
+        if since:
+            clauses.append("created_at_utc >= ?")
+            args.append(datetime.combine(since, datetime.min.time(), timezone.utc).isoformat())
+        if until:
+            clauses.append("created_at_utc < ?")
+            args.append(datetime.combine(until, datetime.min.time(), timezone.utc).isoformat())
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         row = self.conn.execute(
             f"SELECT COUNT(*) c, MIN(created_at_utc) oldest, MAX(created_at_utc) newest FROM tweets {where}",
             args,

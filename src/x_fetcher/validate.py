@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 
-from .fetcher import split_windows
+from .fetcher import is_skippable_window, split_windows
 from .store import Store
 
 
@@ -50,7 +50,9 @@ def validate_range(store: Store, screen_name: str, since: date, until: date, win
         SELECT status_id, text, created_at_utc
         FROM tweets
         WHERE user_id = ?
-          AND (created_at_utc < ? OR created_at_utc >= ? OR text = '' OR status_id GLOB '*[^0-9]*')
+          AND created_at_utc >= ?
+          AND created_at_utc < ?
+          AND (text = '' OR status_id GLOB '*[^0-9]*')
         LIMIT 10
         """,
         (user_id, *bounds),
@@ -58,7 +60,7 @@ def validate_range(store: Store, screen_name: str, since: date, until: date, win
     if bad:
         report.errors.append(f"{len(bad)} sampled tweets have invalid date/text/status_id")
 
-    stats = store.stats(user_id)
+    stats = store.stats(user_id, since, until)
     report.total = int(stats["count"])
     report.oldest = stats["oldest"]
     report.newest = stats["newest"]
@@ -68,7 +70,8 @@ def validate_range(store: Store, screen_name: str, since: date, until: date, win
         win = store.window_status(user_id, win_since, win_until)
         label = f"{win_since.isoformat()}..{win_until.isoformat()}"
         if not win:
-            report.missing_windows.append(label)
+            if not is_skippable_window(store, user_id, win_since, win_until):
+                report.missing_windows.append(label)
         elif win["status"] == "partial":
             report.partial_windows.append(label)
         elif win["status"] == "failed":

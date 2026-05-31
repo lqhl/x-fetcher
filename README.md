@@ -86,7 +86,7 @@ The SQLite database contains:
 
 ## Incremental Fetching
 
-`fetch` splits the target date range into `window_days` windows. Complete windows are skipped on later runs unless `--force-window` is used. Partial or failed windows can be resumed from their saved cursor when available.
+`fetch` splits the target date range into `window_days` windows. Complete windows are skipped on later runs unless `--force-window` is used. If the whole requested range is already covered by complete windows, `fetch` exits after local validation without making X network requests. Partial or failed windows can be resumed from their saved cursor when available.
 
 The recent `UserTweets` phase stops early when it sees only known tweets for enough pages or reaches `user_tweets_max_pages`. Historical coverage is driven by `SearchTimeline` windows.
 
