@@ -1,0 +1,10 @@
+__pycache__/
+.pytest_cache/
+.venv/
+*.egg-info/
+config.yaml
+secrets.yaml
+*.db
+*.db-shm
+*.db-wal
+data/

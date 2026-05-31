@@ -1,0 +1,17 @@
+targets:
+  - screen_name: aleabitoreddit
+    since: "2025-01-01"
+    until: null
+max_tweets: null
+db_path: data/x_fetcher.db
+window_days: 7
+user_tweets_stop_known_pages: 3
+user_tweets_max_pages: 10
+request_sleep:
+  user_tweets: [2.5, 5.5]
+  search: [4.0, 8.0]
+  window: [20.0, 45.0]
+backoff:
+  rate_limit_seconds: [300, 600, 1200, 2400]
+  service_unavailable_seconds: [60, 180]
+  max_consecutive: 4

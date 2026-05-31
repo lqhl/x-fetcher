@@ -1,0 +1,26 @@
+[project]
+name = "x-fetcher"
+version = "0.1.0"
+description = "Cookie-authenticated X timeline fetcher with multi-user SQLite storage"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "curl-cffi>=0.7.4",
+    "pyyaml>=6.0.2",
+]
+
+[project.scripts]
+x-fetcher = "x_fetcher.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
